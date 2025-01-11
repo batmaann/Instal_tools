@@ -43,6 +43,12 @@ set_bottom_panel() {
 
 
 install_google_chrome() {
+    # Проверяем, установлен ли Google Chrome
+    if command -v google-chrome &> /dev/null; then
+        echo "Google Chrome уже установлен. Пропускаем установку."
+        return
+    fi
+
     echo "Загрузка последней версии Google Chrome..."
 
     # Загрузка .deb файла Google Chrome
@@ -61,8 +67,13 @@ install_google_chrome() {
     echo "Установка Google Chrome завершена!"
 }
 
-
 install_zsh() {
+    # Проверяем, установлен ли Zsh
+    if command -v zsh &> /dev/null; then
+        echo "Zsh уже установлен. Пропускаем установку."
+        return
+    fi
+
     # Обновляем список пакетов
     sudo apt update
 
