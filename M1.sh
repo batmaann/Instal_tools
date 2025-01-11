@@ -13,7 +13,7 @@ update_packages() {
     echo "Обновление пакетов завершено!"
 }
 
-# Функция для установки актуальной версии Git
+
 install_git() {
     # Проверка, установлен ли Git
     if command -v git &> /dev/null; then
@@ -40,7 +40,8 @@ set_bottom_panel() {
     gsettings set org.gnome.shell.extensions.dash-to-panel panel-position 'bottom'
     echo "Боковая панель настроена внизу."
 }
-# Функция для установки актуальной версии Google Chrome
+
+
 install_google_chrome() {
     echo "Загрузка последней версии Google Chrome..."
 
@@ -60,12 +61,28 @@ install_google_chrome() {
     echo "Установка Google Chrome завершена!"
 }
 
+
+install_zsh() {
+    # Обновляем список пакетов
+    sudo apt update
+
+    # Устанавливаем Zsh
+    sudo apt install -y zsh
+
+    # Устанавливаем Zsh по умолчанию
+    chsh -s $(which zsh)
+
+    # Выводим сообщение об успешной установке
+    echo "Zsh установлен и установлен по умолчанию. Пожалуйста, перезагрузите терминал или выполните 'zsh' для входа в Zsh."
+}
+
 # Основная функция
 main() {
     update_packages
     install_git
     #set_bottom_panel
     install_google_chrome
+    install_zsh
 }
 
 # Вызов основной функции
