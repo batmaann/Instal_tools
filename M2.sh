@@ -1,164 +1,175 @@
 #!/usr/bin/env bash
 
-# Функция для проверки обновляемых пакетов
-check_upgradable_packages() {
-    echo "Проверка доступных обновлений пакетов..."
-    local upgradable=$(apt list --upgradable 2>/dev/null | grep -v "^Листинг...$" | wc -l)
-    
-    if [[ $upgradable -gt 0 ]]; then
-        echo "Найдено пакетов для обновления: $upgradable"
-        echo "Список обновляемых пакетов:"
-        apt list --upgradable 2>/dev/null | grep -v "^Листинг...$"
-        return 0
-    else
-        echo "Нет доступных обновлений для установленных пакетов."
-        return 1
-    fi
+set -euo pipefail
+
+# Конфигурация
+STATUS_DIR="/var/lib/matrix-synapse/status"
+FORCE_MODE=false
+
+# Цвета для вывода
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m'
+
+# Обработка аргументов
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --force) FORCE_MODE=true ;;
+        *) echo -e "${RED}Неизвестный аргумент: $1${NC}"; exit 1 ;;
+    esac
+    shift
+done
+
+# Функции проверки выполненных шагов
+check_step_I() {
+    [ -f "${STATUS_DIR}/step1_completed" ] || 
+    [ -f /etc/apt/sources.list.d/matrix-org.list ]
 }
 
-# Установка зависимостей и настройка репозитория Matrix.org
+check_step_II() {
+    [ -f "${STATUS_DIR}/step2_completed" ] ||
+    dpkg -l matrix-synapse-py3 &> /dev/null
+}
+
+check_step_III() {
+    [ -f "${STATUS_DIR}/step3_completed" ] ||
+    [ -f /etc/matrix-synapse/homeserver.yaml ]
+}
+
+check_step_IV() {
+    [ -f "${STATUS_DIR}/step4_completed" ]
+}
+
+# Инициализация системы
+init_system() {
+    sudo mkdir -p "${STATUS_DIR}"
+    sudo chmod 755 "${STATUS_DIR}"
+}
+
+# Шаг 1: Установка зависимостей
 install_dependencies_step_I() {
-    local -r step_name="Установка зависимостей и настройка Matrix.org"
-    echo "=== ${step_name} ==="
-    
-    # 1. Обновление системы
-    echo "1. Обновление списка пакетов и системы..."
-    if ! sudo apt update; then
-        echo "Ошибка при обновлении списка пакетов" >&2
-        return 1
+    if ! $FORCE_MODE && check_step_I; then
+        echo -e "${GREEN}Шаг 1 уже выполнен, пропускаем...${NC}"
+        return 0
     fi
-    
-    # Проверка доступных обновлений перед установкой
-    check_upgradable_packages
-    
-    if ! sudo apt upgrade -y; then
-        echo "Ошибка при обновлении пакетов" >&2
-        return 1
+
+    if ! install_dependencies_step_I; then
+        echo -e "${RED}Ошибка на шаге 1. Прерывание работы.${NC}" >&2
+        exit 1
     fi
-    
-    # 2. Установка базовых зависимостей
-    echo "2. Установка необходимых пакетов..."
-    local -a base_packages=("curl" "gnupg" "apt-transport-https" "lsb-release")
-    if ! sudo apt install -y "${base_packages[@]}"; then
-        echo "Ошибка при установке базовых пакетов" >&2
-        return 1
-    fi
-    
-    # 3. Настройка репозитория Matrix.org
-    echo "3. Настройка репозитория Matrix.org..."
-    
-    # 3.1. Добавление GPG ключа
-    echo "3.1. Импорт GPG ключа..."
-    if ! curl -s https://packages.matrix.org/debian/matrix-org-archive-keyring.gpg | sudo gpg --dearmor -o /usr/share/keyrings/matrix-org-archive-keyring.gpg; then
-        echo "Ошибка при импорте GPG ключа" >&2
-        return 1
-    fi
-    
-    # 3.2. Добавление репозитория
-    echo "3.2. Добавление репозитория в sources.list..."
-    local -r distro_codename=$(lsb_release -cs)
-    if ! echo "deb [signed-by=/usr/share/keyrings/matrix-org-archive-keyring.gpg] https://packages.matrix.org/debian/ ${distro_codename} main" | sudo tee /etc/apt/sources.list.d/matrix-org.list >/dev/null; then
-        echo "Ошибка при добавлении репозитория" >&2
-        return 1
-    fi
-    
-    # 4. Обновление после добавления репозитория
-    echo "4. Обновление списка пакетов..."
-    if ! sudo apt update; then
-        echo "Ошибка при обновлении после добавления репозитория" >&2
-        return 1
-    fi
-    
-    # Повторная проверка обновлений после всех изменений
-    check_upgradable_packages
-    
-    echo "=== ${step_name} завершена успешно ==="
+
+    sudo touch "${STATUS_DIR}/step1_completed"
+    echo -e "${GREEN}=== Установка зависимостей завершена успешно ===${NC}"
     return 0
 }
 
-# Шаг 2: Установка Synapse (сервер Matrix)
+# Шаг 2: Установка Synapse
 install_synapse_step_II() {
-    local -r step_name="Установка Synapse (Matrix сервер)"
-    echo "=== ${step_name} ==="
-
-    # 1. Установка пакета
-    echo "1. Установка matrix-synapse-py3..."
-    if ! sudo apt install -y matrix-synapse-py3; then
-        echo "Ошибка при установке Synapse" >&2
-        return 1
+    if ! $FORCE_MODE && check_step_II; then
+        echo -e "${GREEN}Шаг 2 уже выполнен, пропускаем...${NC}"
+        return 0
     fi
 
-    # 2. Конфигурация сервера
-    echo "2. Настройка сервера Synapse"
+    if ! install_synapse_step_II; then
+        echo -e "${RED}Ошибка на шаге 2. Прерывание работы.${NC}" >&2
+        exit 1
+    fi
+
+    sudo touch "${STATUS_DIR}/step2_completed"
+    echo -e "${GREEN}=== Установка Synapse завершена успешно ===${NC}"
+    return 0
+}
+
+# Шаг 3: Настройка Synapse
+configure_synapse_step_III() {
+    if ! $FORCE_MODE && check_step_III; then
+        echo -e "${GREEN}Шаг 3 уже выполнен, пропускаем...${NC}"
+        return 0
+    fi
+
+    if ! configure_synapse_step_III; then
+        echo -e "${RED}Ошибка на шаге 3. Прерывание работы.${NC}" >&2
+        exit 1
+    fi
+
+    sudo touch "${STATUS_DIR}/step3_completed"
+    echo -e "${GREEN}=== Настройка Synapse завершена успешно ===${NC}"
+    return 0
+}
+
+# Шаг 4: Настройка брандмауэра
+configure_firewall_step_IV() {
+    local -r step_name="Настройка брандмауэра"
+    echo -e "\n${GREEN}=== ${step_name} ===${NC}"
+
+    # Проверка UFW
+    if ! command -v ufw &> /dev/null; then
+        echo -e "${YELLOW}UFW не установлен. Установите его командой:"
+        echo -e "sudo apt install ufw${NC}"
+        return 0
+    fi
+
+    # Защита от сбоев
+    set +e
+    trap 'echo -e "${RED}Ошибка в шаге 4${NC}"; sudo ufw --force reset; return 1' ERR
+
+    # Настройка правил
+    echo -e "${YELLOW}1. Настройка правил...${NC}"
+    sudo ufw --force reset
+    sudo ufw default deny incoming
+    sudo ufw default allow outgoing
     
-    # Запрос имени сервера
-    local server_name
-    read -p "Введите имя сервера (например, example.com или IP-адрес): " server_name
+    # Основные правила
+    sudo ufw allow 8008/tcp comment "HTTP-API Synapse"
+    sudo ufw allow 443/tcp comment "HTTPS"
     
-    # Проверка ввода
-    if [[ -z "$server_name" ]]; then
-        echo "Имя сервера не может быть пустым!" >&2
-        return 1
-    fi
-
-    # Запрос об отправке отчетов
-    local report_stats
-    while true; do
-        read -p "Отправлять отчеты об ошибках разработчикам? (yes/no) [no]: " report_stats
-        report_stats=${report_stats:-no}
-        case "$report_stats" in
-            [Yy]|[Yy][Ee][Ss]) report_stats="yes"; break ;;
-            [Nn]|[Nn][Oo]) report_stats="no"; break ;;
-            *) echo "Пожалуйста, введите yes или no" ;;
-        esac
-    done
-
-    # 3. Генерация конфигурации
-    echo "3. Генерация конфигурации..."
-    sudo bash -c "cat > /etc/matrix-synapse/conf.d/server.yaml << EOF
-server_name: $server_name
-report_stats: $report_stats
-EOF"
-
-    # 4. Перезапуск службы
-    echo "4. Перезапуск Synapse..."
-    if ! sudo systemctl restart matrix-synapse; then
-        echo "Ошибка при перезапуске Synapse" >&2
-        return 1
-    fi
-
-    # 5. Проверка статуса
-    echo "5. Проверка статуса сервиса..."
-    sudo systemctl status matrix-synapse --no-pager
-
-    echo "=== ${step_name} завершена успешно ==="
+    # Включение
+    echo -e "${YELLOW}2. Активация брандмауэра...${NC}"
+    echo "y" | sudo ufw enable
+    
+    # Проверка
+    echo -e "${YELLOW}3. Итоговые правила:${NC}"
+    sudo ufw status numbered
+    
+    # Фиксация успешного выполнения
+    sudo touch "${STATUS_DIR}/step4_completed"
+    set -e
+    trap - ERR
+    
+    echo -e "${GREEN}=== ${step_name} завершена успешно ===${NC}"
     return 0
 }
 
 main() {
-    echo "=== Начало выполнения скрипта ==="
+    init_system
+    echo -e "\n${GREEN}=== Начало установки Matrix Synapse ===${NC}"
     
-    # Выполняем Шаг 1: Установка зависимостей
-    echo "Запуск Шага 1: Установка зависимостей..."
-    if ! install_dependencies_step_I; then
-        echo "Ошибка на Шаге 1: Установка зависимостей не удалась" >&2
-        exit 1
+    # Запрос подтверждения при повторном запуске
+    if ! $FORCE_MODE && { check_step_I || check_step_II || check_step_III; }; then
+        echo -e "${YELLOW}Обнаружены следы предыдущей установки. Хотите продолжить? (yes/no) [no]:${NC}"
+        read continue_install
+        if [ "${continue_install:-no}" != "yes" ]; then
+            echo -e "${YELLOW}Установка прервана пользователем${NC}"
+            exit 0
+        fi
     fi
-    echo "Шаг 1 успешно завершен"
+
+    install_dependencies_step_I
+    install_synapse_step_II
+    configure_synapse_step_III
+    configure_firewall_step_IV
+
+      echo -e "\n${GREEN}=== Установка завершена успешно! ===${NC}"
+    echo -e "Сервер Matrix Synapse готов к работе"
+    echo -e "Основные файлы конфигурации:"
+    echo -e " - /etc/matrix-synapse/homeserver.yaml"
+    echo -e " - /etc/matrix-synapse/conf.d/server.yaml"
+    echo -e "\nДля дальнейшей настройки:"
+    echo -e "1. Откройте порт 8008 в брандмауэре (если нужен внешний доступ)"
+    echo -e "2. Настройте обратный прокси (Nginx/Apache) для HTTPS"
+    echo -e "3. Для регистрации пользователей установите enable_registration: true"
     
-    # Выполняем Шаг 2: Установка Synapse
-    echo "Запуск Шага 2: Установка Synapse..."
-    if ! install_synapse_step_II; then
-        echo "Ошибка на Шаге 2: Установка Synapse не удалась" >&2
-        exit 1
-    fi
-    echo "Шаг 2 успешно завершен"
-    
-    # Завершение скрипта
-    echo "=== Все шаги успешно выполнены ==="
-    echo "Сервер Matrix Synapse установлен и настроен"
-    echo "Дополнительные настройки можно выполнить в файле конфигурации:"
-    echo "/etc/matrix-synapse/conf.d/server.yaml"
     exit 0
 }
 
