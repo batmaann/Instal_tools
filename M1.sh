@@ -94,6 +94,7 @@ main() {
     #set_bottom_panel
     install_google_chrome
     install_zsh
+    
 }
 
 # Вызов основной функции
