@@ -114,6 +114,67 @@ install_google_chrome() {
     fi
 }
 
+install_oh_my_zsh() {
+    log "${GREEN}Проверка установки Oh My Zsh...${NC}"
+    if [ ! -d "$HOME/.oh-my-zsh" ]; then
+        log "${GREEN}Установка Oh My Zsh...${NC}"
+        if sh -c "$(wget https://raw.github.com/ohmyzsh/ohmyzsh/master/tools/install.sh -O -)" >> "$LOG_FILE" 2>&1; then
+            log "${GREEN}Oh My Zsh успешно установлен${NC}"
+            return 0
+        else
+            log "${RED}Ошибка при установке Oh My Zsh${NC}"
+            return 1
+        fi
+    else
+        log "${YELLOW}Oh My Zsh уже установлен${NC}"
+        return 0
+    fi
+}
+
+setup_bira_theme() {
+    log "${GREEN}Проверка текущей темы Zsh...${NC}"
+    
+    local zshrc_file="$HOME/.zshrc"
+    
+    # Проверяем, установлен ли Oh My Zsh
+    if [ ! -d "$HOME/.oh-my-zsh" ]; then
+        log "${RED}Oh My Zsh не установлен. Сначала установите Oh My Zsh.${NC}"
+        return 1
+    fi
+    
+    # Проверяем существование файла .zshrc
+    if [ ! -f "$zshrc_file" ]; then
+        log "${YELLOW}Файл .zshrc не найден, создаем новый...${NC}"
+        cp "$HOME/.oh-my-zsh/templates/zshrc.zsh-template" "$zshrc_file"
+    fi
+    
+    # Проверяем текущую тему
+    if grep -q '^ZSH_THEME="bira"' "$zshrc_file"; then
+        log "${YELLOW}Тема bira уже установлена, пропускаем...${NC}"
+        return 0
+    elif grep -q '^ZSH_THEME=' "$zshrc_file"; then
+        log "${YELLOW}Обнаружена другая тема, меняем на bira...${NC}"
+    else
+        log "${YELLOW}Тема не указана, устанавливаем bira...${NC}"
+    fi
+    
+    # Делаем резервную копию .zshrc, если она еще не существует
+    if [ ! -f "${zshrc_file}.bak" ]; then
+        cp "$zshrc_file" "${zshrc_file}.bak"
+        log "${YELLOW}Создана резервная копия .zshrc: ${zshrc_file}.bak${NC}"
+    fi
+    
+    # Устанавливаем тему bira
+    if sed -i 's/^ZSH_THEME=.*/ZSH_THEME="bira"/' "$zshrc_file" 2>> "$LOG_FILE"; then
+        log "${GREEN}Тема bira успешно установлена${NC}"
+        log "${YELLOW}Для применения изменений перезагрузите терминал или выполните: source ~/.zshrc${NC}"
+        return 0
+    else
+        log "${RED}Ошибка при настройке темы bira${NC}"
+        return 1
+    fi
+}
+
 install_zsh() {
     if is_package_installed zsh; then
         current_shell=$(basename "$SHELL")
@@ -122,18 +183,24 @@ install_zsh() {
         else
             log "${YELLOW}Zsh уже установлен, но не является оболочкой по умолчанию. Текущая оболочка: $current_shell${NC}"
         fi
-        return 0
-    fi
-
-    log "${GREEN}Установка Zsh...${NC}"
-    if safe_apt install zsh; then
-        chsh -s "$(which zsh)"
-        log "${GREEN}Zsh успешно установлен и установлен как оболочка по умолчанию. Версия: $(zsh --version | awk '{print $2}')${NC}"
-        log "${YELLOW}Перезагрузите терминал или выполните 'zsh' для входа в Zsh${NC}"
     else
-        log "${RED}Ошибка при установке Zsh${NC}"
-        return 1
+        log "${GREEN}Установка Zsh...${NC}"
+        if safe_apt install zsh; then
+            chsh -s "$(which zsh)"
+            log "${GREEN}Zsh успешно установлен и установлен как оболочка по умолчанию. Версия: $(zsh --version | awk '{print $2}')${NC}"
+        else
+            log "${RED}Ошибка при установке Zsh${NC}"
+            return 1
+        fi
     fi
+    
+    # Установка Oh My Zsh и темы bira (если Zsh установлен или уже был установлен)
+    if install_oh_my_zsh; then
+        setup_bira_theme
+    fi
+    
+    log "${YELLOW}Перезагрузите терминал или выполните 'zsh' для входа в Zsh${NC}"
+    return 0
 }
 
 main() {
