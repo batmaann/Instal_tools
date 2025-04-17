@@ -1,6 +1,4 @@
-[file name]: M2.sh
-[file content begin]
-#!/usr/bin/env bash
+#!/bin/bash
 
 set -euo pipefail
 
