@@ -324,7 +324,7 @@ EOD
 # Функция проверки выполнения 8 шага
 check_step_VIII() {
     [ -f "${STATUS_DIR}/step8_completed" ] || \
-    [ -f /etc/letsencrypt/live/$(grep "server_name" /etc/nginx/sites-available/matrix | awk '{print $2}' | sed "s/;//")/fullchain.pem ]
+    [ -f "/etc/letsencrypt/live/$(grep "server_name" /etc/nginx/sites-available/matrix | awk '{print $2}' | sed 's/;//' | awk '{print $1}')/fullchain.pem" ]
 }
 
 # Шаг 8: Дополнительные настройки
@@ -338,8 +338,9 @@ configure_additional_settings_step_VIII() {
     echo -e "\n${GREEN}=== ${step_name} ===${NC}"
     
     # Получаем доменное имя из конфига nginx
-    local domain_name=$(grep "server_name" /etc/nginx/sites-available/matrix | awk '{print $2}' | sed 's/;//')
-    
+    local domains=($(grep "server_name" /etc/nginx/sites-available/matrix | awk '{print $2}' | sed 's/;//'))
+    local primary_domain="${domains[0]}"
+
     if [[ -z "$domain_name" || "$domain_name" == "your-domain.com" ]]; then
         echo -e "${RED}Ошибка: доменное имя не настроено!${NC}"
         echo -e "${YELLOW}Замените 'your-domain.com' в конфиге Nginx на ваше доменное имя и повторите попытку.${NC}"

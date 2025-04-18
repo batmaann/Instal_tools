@@ -203,6 +203,41 @@ install_zsh() {
     return 0
 }
 
+    install_outline_client() {
+        if is_package_installed outline-client; then
+            log "${YELLOW}Outline Client уже установлен${NC}"
+            return 0
+        fi
+
+        log "${GREEN}Добавление репозитория Outline Client...${NC}"
+        
+        # Импорт GPG ключа
+        if ! wget -qO- https://us-apt.pkg.dev/doc/repo-signing-key.gpg | sudo gpg --dearmor -o /etc/apt/trusted.gpg.d/gcloud-artifact-registry-us.gpg 2>> "$LOG_FILE"; then
+            log "${RED}Ошибка при импорте GPG ключа${NC}"
+            return 1
+        fi
+        
+        # Добавление репозитория
+        if ! echo "deb [arch=amd64] https://us-apt.pkg.dev/projects/jigsaw-outline-apps outline-client main" | sudo tee /etc/apt/sources.list.d/outline-client.list >> "$LOG_FILE" 2>&1; then
+            log "${RED}Ошибка при добавлении репозитория${NC}"
+            return 1
+        fi
+        
+        # Обновление пакетов после добавления репозитория
+        if ! safe_apt update; then
+            log "${RED}Ошибка при обновлении списка пакетов${NC}"
+            return 1
+        fi
+        
+        log "${GREEN}Установка Outline Client...${NC}"
+        if safe_apt install outline-client; then
+            log "${GREEN}Outline Client успешно установлен${NC}"
+        else
+            log "${RED}Ошибка при установке Outline Client${NC}"
+            return 1
+        fi
+    }
+
 main() {
     log "=== Начало установки ==="
     
@@ -215,6 +250,7 @@ main() {
         install_git
         install_google_chrome
         install_zsh
+        install_outline_client
     )
     
     for func in "${functions[@]}"; do
