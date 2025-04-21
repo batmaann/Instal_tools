@@ -337,22 +337,41 @@ configure_additional_settings_step_VIII() {
 
     echo -e "\n${GREEN}=== ${step_name} ===${NC}"
     
-    # Получаем доменное имя из конфига nginx
-    local domains=($(grep "server_name" /etc/nginx/sites-available/matrix | awk '{print $2}' | sed 's/;//'))
-    local primary_domain="${domains[0]}"
+    # 1. Получение доменного имени
+    local domain_name=$(grep "server_name" /etc/nginx/sites-available/matrix | awk '{print $2}' | sed 's/;//' | head -n 1 | tr -d '[:space:]')
 
+
+    # Если домен не настроен или остался дефолтным - запрашиваем ввод
     if [[ -z "$domain_name" || "$domain_name" == "your-domain.com" ]]; then
-        echo -e "${RED}Ошибка: доменное имя не настроено!${NC}"
-        echo -e "${YELLOW}Замените 'your-domain.com' в конфиге Nginx на ваше доменное имя и повторите попытку.${NC}"
-        exit 1
+        echo -e "${YELLOW}Доменное имя не настроено или установлено значение по умолчанию.${NC}"
+        while true; do
+            read -p "Введите ваше доменное имя (например: matrix.example.com): " domain_name
+            if [[ "$domain_name" =~ ^[a-zA-Z0-9.-]+$ ]]; then
+                break
+            fi
+            echo -e "${RED}Некорректное доменное имя! Используйте только буквы, цифры, точки и дефисы.${NC}"
+        done
+        
+        # Обновляем домен в конфиге Nginx
+        echo -e "${YELLOW}Обновление конфигурации Nginx...${NC}"
+        sudo sed -i "s/server_name .*/server_name $domain_name;/" /etc/nginx/sites-available/matrix
+        
+        # Проверка синтаксиса
+        if ! sudo nginx -t; then
+            echo -e "${RED}Ошибка в конфигурации Nginx! Откат изменений...${NC}"
+            sudo cp /etc/nginx/sites-available/matrix.bak /etc/nginx/sites-available/matrix
+            exit 1
+        fi
+        sudo systemctl reload nginx
     fi
 
-    # 1. Настройка доступа из интернета
+    echo -e "${GREEN}Используется домен: ${domain_name}${NC}"
+
+    # 2. Настройка доступа из интернета
     echo -e "${YELLOW}1. Настройка доступа из интернета:${NC}"
     echo -e "• Пробросьте на роутере порты:"
     echo -e "  - TCP 443 (HTTPS)"
     echo -e "  - TCP 8448 (Федерация Matrix)"
-    echo -e "• Или настройте DMZ на ваш сервер"
     
     read -p "Продолжить после настройки роутера? (y/n) [n]: " router_configured
     if [[ "${router_configured:-n}" != "y" ]]; then
@@ -360,50 +379,34 @@ configure_additional_settings_step_VIII() {
         exit 0
     fi
 
-    # 2. Настройка DDNS (если IP динамический)
-    echo -e "${YELLOW}2. Настройка динамического DNS (если нет статического IP):${NC}"
-    if ! dig +short $domain_name | grep -qP '^\d+\.\d+\.\d+\.\d+$'; then
+    # 3. Проверка DNS
+    echo -e "${YELLOW}2. Проверка DNS-записей...${NC}"
+    if ! dig +short "$domain_name" | grep -qP '^\d+\.\d+\.\d+\.\d+$'; then
         echo -e "${RED}Внимание: домен $domain_name не разрешается в IP-адрес!${NC}"
-        echo -e "${YELLOW}Настройте DDNS или A-запись для вашего домена.${NC}"
-        echo -e "Рекомендуемые бесплатные DDNS-провайдеры:"
-        echo -e "• https://www.noip.com"
-        echo -e "• https://freedns.afraid.org"
-        echo -e "• https://dynv6.com"
+        echo -e "${YELLOW}Настройте A-запись или DDNS для вашего домена.${NC}"
         read -p "Продолжить после настройки DNS? (y/n) [n]: " dns_configured
-        if [[ "${dns_configured:-n}" != "y" ]]; then
-            exit 0
-        fi
+        [[ "${dns_configured:-n}" != "y" ]] && exit 0
     fi
 
-    # 3. Получение SSL-сертификата
-    echo -e "${YELLOW}3. Получение SSL-сертификата Let's Encrypt...${NC}"
-    
-    # Установка certbot
+    # 4. SSL-сертификат
+    echo -e "${YELLOW}3. Получение SSL-сертификата...${NC}"
     if ! command -v certbot &> /dev/null; then
-        echo -e "${YELLOW}Установка certbot...${NC}"
         sudo apt-get install -y certbot python3-certbot-nginx
     fi
 
-    # Временное отключение Nginx для прохождения challenge
-    echo -e "${YELLOW}Временная остановка Nginx...${NC}"
     sudo systemctl stop nginx
-
-    # Получение сертификата
-    echo -e "${YELLOW}Запуск certbot...${NC}"
-    if sudo certbot certonly --standalone --agree-tos --non-interactive --email admin@$domain_name -d $domain_name; then
+    if sudo certbot certonly --standalone --agree-tos --non-interactive -d "$domain_name" --email admin@$domain_name; then
         echo -e "${GREEN}Сертификат успешно получен!${NC}"
     else
         echo -e "${RED}Ошибка получения сертификата!${NC}"
         sudo systemctl start nginx
         exit 1
     fi
-
-    # Запуск Nginx обратно
     sudo systemctl start nginx
 
-    # 4. Обновление конфига Nginx для HTTPS
-    echo -e "${YELLOW}4. Настройка Nginx для HTTPS...${NC}"
-    sudo bash -c "cat > /etc/nginx/sites-available/matrix" <<EOL
+    # 5. Обновление конфига Nginx для HTTPS
+    echo -e "${YELLOW}4. Настройка HTTPS...${NC}"
+    sudo tee /etc/nginx/sites-available/matrix >/dev/null <<EOL
 server {
     listen 80;
     server_name $domain_name;
@@ -431,33 +434,14 @@ server {
 }
 EOL
 
-    # Проверка и перезагрузка Nginx
-    echo -e "${YELLOW}Проверка конфигурации Nginx...${NC}"
-    sudo nginx -t && {
-        sudo systemctl reload nginx
-        echo -e "${GREEN}Nginx успешно переконфигурирован для HTTPS!${NC}"
-    } || {
-        echo -e "${RED}Ошибка в конфигурации Nginx!${NC}"
-        exit 1
-    }
+    sudo nginx -t && sudo systemctl reload nginx
 
-    # 5. Настройка автоматического обновления сертификатов
-    echo -e "${YELLOW}5. Настройка автоматического обновления сертификатов...${NC}"
+    # 6. Настройка автообновления сертификатов
+    echo -e "${YELLOW}5. Настройка автообновления сертификатов...${NC}"
     (sudo crontab -l 2>/dev/null; echo "0 3 * * * certbot renew --quiet --post-hook \"systemctl reload nginx\"") | sudo crontab -
-    echo -e "${GREEN}Задача автоматического обновления добавлена в cron!${NC}"
 
-    # Фиксация выполнения
     sudo touch "${STATUS_DIR}/step8_completed"
-    echo -e "${GREEN}=== ${step_name} завершены успешно ===${NC}"
-    
-    # Вывод итоговой информации
-    echo -e "\n${YELLOW}=== Итоговая информация ===${NC}"
-    echo -e "• Домен: ${GREEN}$domain_name${NC}"
-    echo -e "• HTTPS порт: ${GREEN}443${NC}"
-    echo -e "• Федерация Matrix: ${GREEN}8448/tcp${NC}"
-    echo -e "• Сертификат: ${GREEN}/etc/letsencrypt/live/$domain_name/${NC}"
-    echo -e "\n${GREEN}Настройка завершена! Ваш сервер доступен по https://$domain_name${NC}"
-    
+    echo -e "${GREEN}=== Настройка завершена! Сервер доступен по https://$domain_name ===${NC}"
     return 0
 }
 
