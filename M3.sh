@@ -12,7 +12,7 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
-# Функция для проверки успешности выполнения команды
+# Функция проверки успешности выполнения
 check_success() {
   if [ $? -eq 0 ]; then
     echo -e "${GREEN}Успешно!${NC}"
@@ -22,47 +22,95 @@ check_success() {
   fi
 }
 
-echo -e "${YELLOW}=== Начало настройки SSH-сервера ==="
 
-# 1. Обновление пакетов
-echo -e "${YELLOW}Обновление списка пакетов...${NC}"
-apt update -q
-check_success
+# Проверка и установка curl
+check_curl() {
+  if ! command -v curl &> /dev/null; then
+    echo -e "${YELLOW}Установка curl...${NC}"
+    apt install -y curl
+    check_success
+  fi
+}
 
-# 2. Установка SSH-сервера
-echo -e "${YELLOW}Установка OpenSSH-server...${NC}"
-apt install -y openssh-server
-check_success
+echo -e "${YELLOW}=== Начало проверки и настройки SSH-сервера ==="
 
-# 3. Настройка SSH
-echo -e "${YELLOW}Настройка SSH...${NC}"
+# 1. Проверка и установка curl
+check_curl
 
-# Резервное копирование конфига
-cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak
+# 2. Проверка установки SSH-сервера
+if ! dpkg -l | grep -q openssh-server; then
+  echo -e "${YELLOW}Установка OpenSSH-server...${NC}"
+  apt update -q
+  apt install -y openssh-server
+  check_success
+else
+  echo -e "${YELLOW}OpenSSH-server уже установлен.${NC}"
+fi
 
-# Изменение стандартного порта (случайный порт в диапазоне 1024-49151)
-NEW_SSH_PORT=$(shuf -i 1024-49151 -n 1)
+# 3. Проверка статуса SSH
+if ! systemctl is-active --quiet ssh; then
+  echo -e "${YELLOW}Запуск SSH-сервера...${NC}"
+  systemctl start ssh
+  check_success
+fi
 
-# Настройка конфигурации SSH
-sed -i -e "s/#Port 22/Port $NEW_SSH_PORT/" \
-       -e 's/#PermitRootLogin prohibit-password/PermitRootLogin no/' \
-       -e 's/#PasswordAuthentication yes/PasswordAuthentication no/' \
-       -e 's/#PubkeyAuthentication yes/PubkeyAuthentication yes/' \
-       /etc/ssh/sshd_config
+# 4. Включение автозапуска SSH
+if ! systemctl is-enabled --quiet ssh; then
+  echo -e "${YELLOW}Включение автозапуска SSH...${NC}"
+  systemctl enable ssh
+  check_success
+fi
 
-# Добавляем строку для ограничения попыток входа
-echo "MaxAuthTries 3" >> /etc/ssh/sshd_config
+# 5. Проверка и настройка UFW
+if ! dpkg -l | grep -q ufw; then
+  echo -e "${YELLOW}Установка UFW...${NC}"
+  apt install -y ufw
+  check_success
+fi
 
-check_success
+# Получаем текущий SSH-порт из конфига
+CURRENT_SSH_PORT=$(grep -oP '^Port\s+\K\d+' /etc/ssh/sshd_config || echo "22")
 
-# 4. Настройка UFW
-echo -e "${YELLOW}Настройка брандмауэра...${NC}"
-ufw allow $NEW_SSH_PORT/tcp
-echo "y" | ufw enable
-check_success
+# Если порт не стандартный (не 22), используем его, иначе генерируем новый
+if [ "$CURRENT_SSH_PORT" != "22" ]; then
+  NEW_SSH_PORT=$CURRENT_SSH_PORT
+  echo -e "${YELLOW}Обнаружен нестандартный SSH-порт: $NEW_SSH_PORT${NC}"
+else
+  # Генерация случайного порта
+  NEW_SSH_PORT=$(shuf -i 1024-49151 -n 1)
+  echo -e "${YELLOW}Настройка SSH-порта...${NC}"
+  
+  # Резервное копирование конфига
+  cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak
+  
+  # Настройка конфигурации SSH
+  sed -i -e "s/^#Port 22/Port $NEW_SSH_PORT/" \
+         -e 's/^#PermitRootLogin prohibit-password/PermitRootLogin no/' \
+         -e 's/^#PasswordAuthentication yes/PasswordAuthentication no/' \
+         -e 's/^#PubkeyAuthentication yes/PubkeyAuthentication yes/' \
+         /etc/ssh/sshd_config
+  
+  # Добавляем строку для ограничения попыток входа
+  grep -q "^MaxAuthTries" /etc/ssh/sshd_config || echo "MaxAuthTries 3" >> /etc/ssh/sshd_config
+  
+  check_success
+  
+  # Перезапуск SSH
+  echo -e "${YELLOW}Перезапуск SSH-сервера...${NC}"
+  systemctl restart ssh
+  check_success
+fi
 
-# 5. Генерация SSH-ключей для текущего пользователя (если их нет)
-echo -e "${YELLOW}Генерация SSH-ключей...${NC}"
+# Настройка UFW
+if ! ufw status | grep -q "$NEW_SSH_PORT/tcp"; then
+  echo -e "${YELLOW}Настройка брандмауэра для порта $NEW_SSH_PORT...${NC}"
+  ufw allow $NEW_SSH_PORT/tcp
+  echo "y" | ufw enable
+  check_success
+fi
+
+# 6. Генерация SSH-ключей для текущего пользователя (если их нет)
+echo -e "${YELLOW}Проверка SSH-ключей...${NC}"
 if [ ! -f ~/.ssh/id_rsa ]; then
   ssh-keygen -t rsa -b 4096 -f ~/.ssh/id_rsa -q -N ""
   check_success
@@ -71,11 +119,6 @@ if [ ! -f ~/.ssh/id_rsa ]; then
 else
   echo -e "${YELLOW}SSH-ключи уже существуют.${NC}"
 fi
-
-# 6. Перезапуск SSH
-echo -e "${YELLOW}Перезапуск SSH-сервера...${NC}"
-systemctl restart ssh
-check_success
 
 # 7. Получение сетевой информации
 LOCAL_IP=$(hostname -I | awk '{print $1}')
