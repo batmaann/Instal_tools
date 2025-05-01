@@ -12,6 +12,24 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m'
 
+
+STATUS_DIR="/tmp/install_status"
+mkdir -p "$STATUS_DIR"
+
+# Проверка на права root
+if [[ $EUID -ne 0 ]]; then
+    echo -e "${RED}Этот скрипт должен быть запущен от root или через sudo!${NC}"
+    exit 1
+fi
+
+# Перехват Ctrl+C
+trap "echo -e '${RED}\nУстановка прервана пользователем!${NC}'; exit 130" SIGINT
+
+install_matrix() {
+    echo "Установка Matrix..."
+    # Команды установки здесь
+}
+
 # Обработка аргументов
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -66,7 +84,22 @@ install_dependencies_step_I() {
     sudo apt-get install -y apt-transport-https wget
     wget -qO - https://packages.matrix.org/debian/matrix.org-2023.gpg | sudo gpg --dearmor -o /usr/share/keyrings/matrix-org-archive-keyring.gpg
     echo "deb [signed-by=/usr/share/keyrings/matrix-org-archive-keyring.gpg] https://packages.matrix.org/debian/ default main" | sudo tee /etc/apt/sources.list.d/matrix-org.list
-    
+    echo -e "${GREEN}Скачиваем GPG-ключ Matrix Synapse...${NC}"
+    curl -fsSL https://packages.matrix.org/debian/matrix-org-archive-keyring.gpg | sudo gpg --dearmor -o /usr/share/keyrings/matrix-org-archive-keyring.gpg
+
+    # Проверка успешности скачивания ключа
+    if [ $? -ne 0 ]; then
+        echo -e "${RED}Ошибка при скачивании GPG-ключа!${NC}"
+        exit 1
+    fi
+
+# Добавление репозитория Synapse
+echo -e "${GREEN}Добавляем репозиторий Matrix Synapse...${NC}"
+echo "deb [signed-by=/usr/share/keyrings/matrix-org-archive-keyring.gpg] https://packages.matrix.org/debian/ $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/matrix-org.list
+
+# Обновляем пакеты
+sudo apt update
+
     sudo touch "${STATUS_DIR}/step1_completed"
     echo -e "${GREEN}=== Установка зависимостей завершена успешно ===${NC}"
     return 0
@@ -124,7 +157,7 @@ configure_firewall_step_IV() {
     fi
 
     set +e
-    trap 'echo -e "${RED}Ошибка в шаге 4${NC}"; sudo ufw --force reset; return 1' ERR
+    trap 'echo -e "${RED}Ошибка в шаге 4${NC}"; sudo ufw --force reset; exit 1' ERR
 
     echo -e "${YELLOW}1. Настройка правил...${NC}"
     sudo ufw --force reset
@@ -449,7 +482,6 @@ main() {
     init_system
     echo -e "\n${GREEN}=== Начало установки Matrix Synapse ===${NC}"
     
-    # ... [существующая проверка] ...
 
     install_dependencies_step_I
     install_synapse_step_II

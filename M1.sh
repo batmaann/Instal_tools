@@ -237,6 +237,83 @@ install_zsh() {
             return 1
         fi
     }
+install_docker_desktop() {
+    if is_package_installed docker-desktop || [ -x "$(command -v docker)" ]; then
+        log "${YELLOW}Docker уже установлен. Версия: $(docker --version 2>/dev/null || echo 'не определена')${NC}"
+        return 0
+    fi
+
+    log "${GREEN}Начало установки Docker Desktop...${NC}"
+
+    # 1. Попытка установки через официальный .deb пакет
+    log "${GREEN}Попытка установки через официальный .deb пакет...${NC}"
+    if wget https://desktop.docker.com/linux/main/amd64/docker-desktop-4.27.2-amd64.deb -O /tmp/docker-desktop.deb 2>> "$LOG_FILE"; then
+        if sudo apt-get install -y /tmp/docker-desktop.deb 2>> "$LOG_FILE"; then
+            rm -f /tmp/docker-desktop.deb
+            log "${GREEN}Docker Desktop успешно установлен через .deb пакет${NC}"
+            post_docker_installation
+            return 0
+        else
+            log "${YELLOW}Ошибка при установке .deb пакета, пробуем альтернативный метод...${NC}"
+            rm -f /tmp/docker-desktop.deb
+        fi
+    else
+        log "${YELLOW}Не удалось загрузить .deb пакет, пробуем альтернативный метод...${NC}"
+    fi
+
+    # 2. Альтернативный метод через официальный скрипт
+    log "${GREEN}Попытка установки через официальный скрипт...${NC}"
+    if curl -fsSL https://get.docker.com -o /tmp/get-docker.sh 2>> "$LOG_FILE"; then
+        if sudo sh /tmp/get-docker.sh 2>> "$LOG_FILE"; then
+            rm -f /tmp/get-docker.sh
+            log "${GREEN}Docker Engine успешно установлен${NC}"
+            
+            # Установка Docker Desktop
+            if wget https://desktop.docker.com/linux/main/amd64/docker-desktop-4.27.2-amd64.deb -O /tmp/docker-desktop.deb 2>> "$LOG_FILE"; then
+                if sudo apt-get install -y /tmp/docker-desktop.deb 2>> "$LOG_FILE"; then
+                    rm -f /tmp/docker-desktop.deb
+                    log "${GREEN}Docker Desktop успешно установлен${NC}"
+                    post_docker_installation
+                    return 0
+                else
+                    log "${YELLOW}Не удалось установить Docker Desktop, но Docker Engine установлен${NC}"
+                    return 0
+                fi
+            else
+                log "${YELLOW}Не удалось загрузить Docker Desktop, но Docker Engine установлен${NC}"
+                return 0
+            fi
+        else
+            log "${RED}Ошибка при выполнении официального скрипта установки${NC}"
+            return 1
+        fi
+    else
+        log "${RED}Не удалось загрузить официальный скрипт установки${NC}"
+        return 1
+    fi
+}
+
+post_docker_installation() {
+    log "${GREEN}Настройка Docker после установки...${NC}"
+    
+    # Добавление пользователя в группу docker
+    if ! sudo usermod -aG docker $USER 2>> "$LOG_FILE"; then
+        log "${YELLOW}Не удалось добавить пользователя в группу docker${NC}"
+    fi
+    
+    # Запуск Docker Desktop
+    if ! systemctl --user start docker-desktop 2>> "$LOG_FILE"; then
+        log "${YELLOW}Не удалось запустить Docker Desktop автоматически${NC}"
+        log "${YELLOW}Попробуйте запустить вручную: systemctl --user start docker-desktop${NC}"
+    fi
+    
+    # Включение автозапуска
+    if ! systemctl --user enable docker-desktop 2>> "$LOG_FILE"; then
+        log "${YELLOW}Не удалось настроить автозапуск Docker Desktop${NC}"
+    fi
+    
+    log "${GREEN}Настройка завершена. Может потребоваться перезагрузка системы.${NC}"
+}
 
 main() {
     log "=== Начало установки ==="
@@ -251,6 +328,8 @@ main() {
         install_google_chrome
         install_zsh
         install_outline_client
+        install_docker_desktop
+        post_docker_installation
     )
     
     for func in "${functions[@]}"; do
