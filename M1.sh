@@ -269,32 +269,67 @@ install_zsh() {
     }
 
 main() {
-    log "=== Начало установки ==="
-    
-    # Создаем пустой лог-файл
+    # --- Инициализация ---
+    # Проверка прав sudo (если скрипт требует root)
+    if [ "$(id -u)" -ne 0 ]; then
+        log "${RED}Ошибка: этот скрипт требует прав root/sudo. Запустите с sudo.${NC}"
+        exit 1
+    fi
+
+    # Очистка лог-файла
     > "$LOG_FILE"
-    
-    update_packages || log "${RED}Продолжаем несмотря на ошибки обновления${NC}"
-    
-    declare -a functions=(
-        install_git
-        install_google_chrome
-        install_zsh
-        
-    )
-    
-    for func in "${functions[@]}"; do
-        if ! $func; then
-            log "${RED}Ошибка в функции $func, продолжаем установку...${NC}"
+    log "${GREEN}=== Начало установки ===${NC}"
+
+    # --- Проверка зависимостей ---
+    local dependencies=("wget" "curl" "gpg")  # Пример зависимостей
+    for dep in "${dependencies[@]}"; do
+        if ! command -v "$dep" &>/dev/null; then
+            log "${YELLOW}Установка недостающей зависимости: $dep...${NC}"
+            safe_apt install "$dep" || {
+                log "${RED}Ошибка: не удалось установить $dep. Пропускаем...${NC}"
+                continue
+            }
         fi
     done
-    
-    log "=== Установка завершена ==="
-    log "Подробности в лог-файле: $LOG_FILE"
-    
-    # Вывод последних 10 строк лога для быстрого просмотра
+
+    # --- Основные этапы ---
+    local stages=(
+        "Обновление системы:update_packages"
+        "Установка Git:install_git"
+        "Установка Google Chrome:install_google_chrome"
+        "Установка Zsh:install_zsh"
+    )
+
+    local has_errors=0
+
+    for stage in "${stages[@]}"; do
+        local name="${stage%%:*}"
+        local func="${stage##*:}"
+
+        log "${GREEN}▶ Этап: $name${NC}"
+        
+        if ! $func; then
+            log "${RED}⚠ Ошибка в этапе: $name${NC}"
+            has_errors=1
+        fi
+    done
+
+    # --- Завершение ---
+    if [ $has_errors -eq 0 ]; then
+        log "${GREEN}✔ Установка успешно завершена!${NC}"
+    else
+        log "${YELLOW}⚠ Установка завершена с ошибками. Проверьте лог.${NC}"
+    fi
+
+    # Краткая сводка
+    log "Лог-файл: $LOG_FILE"
     echo -e "\n${YELLOW}=== Последние строки лога ===${NC}"
-    tail -n 10 "$LOG_FILE"
+    tail -n 10 "$LOG_FILE" | sed -e 's/\x1b\[[0-9;]*m//g'  # Удаляем цвета для лога
+
+    # Возвращаем код ошибки, если были проблемы
+    return $has_errors
 }
+
+
 
 main
