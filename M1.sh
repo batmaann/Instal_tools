@@ -268,36 +268,72 @@ install_zsh() {
         fi
     }
 
-main() {
-    # --- Инициализация ---
-    # Проверка прав sudo (если скрипт требует root)
-    if [ "$(id -u)" -ne 0 ]; then
-        log "${RED}Ошибка: этот скрипт требует прав root/sudo. Запустите с sudo.${NC}"
-        exit 1
-    fi
+# Добавьте эту функцию перед main()
+show_menu() {
+    while true; do
+        clear
+        echo -e "${GREEN}========================================${NC}"
+        echo -e "${GREEN}         ИНТЕРАКТИВНОЕ МЕНЮ            ${NC}"
+        echo -e "${GREEN}========================================${NC}"
+        echo -e "1. Полная установка (все компоненты)"
+        echo -e "2. Только обновление пакетов"
+        echo -e "3. Установить Git"
+        echo -e "4. Установить Google Chrome"
+        echo -e "5. Установить Zsh + Oh My Zsh"
+        echo -e "6. Установить Outline Client"
+        echo -e "7. Выход"
+        echo -e "${GREEN}========================================${NC}"
+        read -p "Выберите действие [1-7]: " choice
 
-    # Очистка лог-файла
-    > "$LOG_FILE"
-    log "${GREEN}=== Начало установки ===${NC}"
+        case $choice in
+            1)
+                # Полная установка
+                full_installation
+                ;;
+            2)
+                # Только обновление пакетов
+                update_packages
+                ;;
+            3)
+                # Установка Git
+                install_git
+                ;;
+            4)
+                # Установка Google Chrome
+                install_google_chrome
+                ;;
+            5)
+                # Установка Zsh
+                install_zsh
+                ;;
+            6)
+                # Установка Outline Client
+                install_outline_client
+                ;;
+            7)
+                echo -e "${GREEN}Выход...${NC}"
+                exit 0
+                ;;
+            *)
+                echo -e "${RED}Неверный выбор, попробуйте снова${NC}"
+                sleep 2
+                ;;
+        esac
 
-    # --- Проверка зависимостей ---
-    local dependencies=("wget" "curl" "gpg")  # Пример зависимостей
-    for dep in "${dependencies[@]}"; do
-        if ! command -v "$dep" &>/dev/null; then
-            log "${YELLOW}Установка недостающей зависимости: $dep...${NC}"
-            safe_apt install "$dep" || {
-                log "${RED}Ошибка: не удалось установить $dep. Пропускаем...${NC}"
-                continue
-            }
-        fi
+        read -p "Нажмите Enter чтобы продолжить..."
     done
+}
 
-    # --- Основные этапы ---
+# Добавьте эту новую функцию для полной установки
+full_installation() {
+    log "${GREEN}=== Начало полной установки ===${NC}"
+
     local stages=(
         "Обновление системы:update_packages"
         "Установка Git:install_git"
         "Установка Google Chrome:install_google_chrome"
         "Установка Zsh:install_zsh"
+        "Установка Outline Client:install_outline_client"
     )
 
     local has_errors=0
@@ -314,22 +350,57 @@ main() {
         fi
     done
 
-    # --- Завершение ---
     if [ $has_errors -eq 0 ]; then
-        log "${GREEN}✔ Установка успешно завершена!${NC}"
+        log "${GREEN}✔ Полная установка успешно завершена!${NC}"
     else
         log "${YELLOW}⚠ Установка завершена с ошибками. Проверьте лог.${NC}"
     fi
 
-    # Краткая сводка
-    log "Лог-файл: $LOG_FILE"
-    echo -e "\n${YELLOW}=== Последние строки лога ===${NC}"
-    tail -n 10 "$LOG_FILE" | sed -e 's/\x1b\[[0-9;]*m//g'  # Удаляем цвета для лога
-
-    # Возвращаем код ошибки, если были проблемы
     return $has_errors
 }
 
+# Модифицируйте функцию main()
+main() {
+    # Проверка прав sudo
+    if [ "$(id -u)" -ne 0 ]; then
+        log "${RED}Ошибка: этот скрипт требует прав root/sudo. Запустите с sudo.${NC}"
+        exit 1
+    fi
 
+    # Очистка лог-файла
+    > "$LOG_FILE"
+    
+    # Если есть аргументы командной строки, выполнить их
+    if [ $# -gt 0 ]; then
+        case $1 in
+            --full)
+                full_installation
+                ;;
+            --update)
+                update_packages
+                ;;
+            --git)
+                install_git
+                ;;
+            --chrome)
+                install_google_chrome
+                ;;
+            --zsh)
+                install_zsh
+                ;;
+            --outline)
+                install_outline_client
+                ;;
+            *)
+                echo "Использование: $0 [--full|--update|--git|--chrome|--zsh|--outline]"
+                exit 1
+                ;;
+        esac
+    else
+        # Если аргументов нет, показать меню
+        show_menu
+    fi
+}
 
-main
+# Измените вызов main в конце скрипта на:
+main "$@"
