@@ -277,6 +277,55 @@ install_zsh() {
         fi
     }
 
+install_postman() {
+    if is_package_installed postman; then
+        log "${YELLOW}Postman уже установлен${NC}"
+        return 0
+    fi
+
+    log "${GREEN}Установка Postman...${NC}"
+    
+    # Скачивание и установка Postman как snap-пакета
+    if sudo snap install postman >> "$LOG_FILE" 2>&1; then
+        log "${GREEN}Postman успешно установлен${NC}"
+        return 0
+    else
+        log "${RED}Ошибка при установке Postman через snap${NC}"
+        
+        # Альтернативный метод установки (через tar.gz)
+        log "${YELLOW}Попытка установки через tar.gz...${NC}"
+        
+        local temp_dir=$(mktemp -d)
+        local version="10.24.7"  # Можно обновлять по мере выхода новых версий
+        
+        if wget "https://dl.pstmn.io/download/latest/linux64" -O "$temp_dir/postman.tar.gz" >> "$LOG_FILE" 2>&1; then
+            log "${GREEN}Распаковка Postman...${NC}"
+            sudo tar -xzf "$temp_dir/postman.tar.gz" -C /opt >> "$LOG_FILE" 2>&1
+            sudo ln -s /opt/Postman/Postman /usr/bin/postman
+            
+            # Создание ярлыка для рабочего стола
+            cat <<EOF | sudo tee /usr/share/applications/postman.desktop > /dev/null
+[Desktop Entry]
+Name=Postman
+Exec=/opt/Postman/Postman
+Icon=/opt/Postman/app/resources/app/assets/icon.png
+Terminal=false
+Type=Application
+Categories=Development;
+EOF
+            
+            rm -rf "$temp_dir"
+            log "${GREEN}Postman успешно установлен в /opt/Postman${NC}"
+            return 0
+        else
+            log "${RED}Ошибка при загрузке Postman${NC}"
+            rm -rf "$temp_dir"
+            return 1
+        fi
+    fi
+}
+
+
 # Добавьте эту функцию перед main()
 show_menu() {
     while true; do
@@ -290,9 +339,10 @@ show_menu() {
         echo -e "4. Установить Google Chrome"
         echo -e "5. Установить Zsh + Oh My Zsh"
         echo -e "6. Установить Outline Client"
-        echo -e "7. Выход"
+        echo -e "7. Установить Postman"
+        echo -e "8. Выход"
         echo -e "${GREEN}========================================${NC}"
-        read -p "Выберите действие [1-7]: " choice
+        read -p "Выберите действие [1-8]: " choice
 
         case $choice in
             1)
@@ -320,6 +370,9 @@ show_menu() {
                 install_outline_client
                 ;;
             7)
+                install_postman
+                ;;
+            8)
                 echo -e "${GREEN}Выход...${NC}"
                 exit 0
                 ;;
@@ -343,6 +396,7 @@ full_installation() {
         "Установка Google Chrome:install_google_chrome"
         "Установка Zsh:install_zsh"
         "Установка Outline Client:install_outline_client"
+        "Установка Postman:install_postman"
     )
 
     local has_errors=0
