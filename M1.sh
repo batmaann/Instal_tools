@@ -28,19 +28,25 @@ safe_apt() {
     shift
     local retries=3
     local delay=5
+    local success=0
     
     for ((i=1; i<=retries; i++)); do
-        if sudo apt-get $command -y "$@" >> "$LOG_FILE" 2>&1; then
-            return 0
+        log "${BLUE}Попытка $i: apt-get $command $*${NC}"
+        if sudo apt-get "$command" -y "$@" >> "$LOG_FILE" 2>&1; then
+            success=1
+            break
         else
-            log "${YELLOW}Попытка $i из $retries не удалась. Повтор через $delay секунд...${NC}"
-            sleep $delay
+            log "${YELLOW}Ошибка, повтор через $delay сек...${NC}"
+            sleep "$delay"
             sudo apt-get --fix-broken install -y >> "$LOG_FILE" 2>&1
         fi
     done
     
-    log "${RED}Ошибка при выполнении apt-get $command${NC}"
-    return 1
+    if [ "$success" -eq 0 ]; then
+        log "${RED}Не удалось выполнить: apt-get $command $*${NC}"
+        return 1
+    fi
+    return 0
 }
 
 # Функция для обновления пакетов
