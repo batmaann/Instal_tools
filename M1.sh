@@ -330,6 +330,21 @@ EOF
         fi
     fi
 }
+install_htop() {
+    if is_package_installed htop; then
+        log "${YELLOW}htop уже установлен. Версия: $(htop --version | head -n1 | awk '{print $2}')${NC}"
+        return 0
+    fi
+
+    log "${GREEN}Установка htop...${NC}"
+    if safe_apt install htop; then
+        log "${GREEN}htop успешно установлен. Версия: $(htop --version | head -n1 | awk '{print $2}')${NC}"
+        return 0
+    else
+        log "${RED}Ошибка при установке htop${NC}"
+        return 1
+    fi
+}
 
 
 # Добавьте эту функцию перед main()
@@ -346,7 +361,8 @@ show_menu() {
         echo -e "5. Установить Zsh + Oh My Zsh"
         echo -e "6. Установить Outline Client"
         echo -e "7. Установить Postman"
-        echo -e "8. Выход"
+        echo -e "8. Установить htop"
+        echo -e "9. Выход"
         echo -e "${GREEN}========================================${NC}"
         read -p "Выберите действие [1-8]: " choice
 
@@ -379,6 +395,10 @@ show_menu() {
                 install_postman
                 ;;
             8)
+                # Установка htop
+                install_htop
+                ;;
+            9)
                 echo -e "${GREEN}Выход...${NC}"
                 exit 0
                 ;;
@@ -403,6 +423,7 @@ full_installation() {
         "Установка Zsh:install_zsh"
         "Установка Outline Client:install_outline_client"
         "Установка Postman:install_postman"
+        "Установка htop:install_htop"
     )
 
     local has_errors=0
@@ -460,6 +481,9 @@ main() {
             --outline)
                 install_outline_client
                 ;;
+            --htop)
+                install_htop
+                ;;    
             *)
                 echo "Использование: $0 [--full|--update|--git|--chrome|--zsh|--outline]"
                 exit 1
