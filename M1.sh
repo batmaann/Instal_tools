@@ -346,6 +346,36 @@ install_htop() {
     fi
 }
 
+install_vscode() {
+    if is_package_installed code; then
+        log "${YELLOW}Visual Studio Code уже установлен. Версия: $(code --version | head -n1)${NC}"
+        return 0
+    fi
+
+    log "${GREEN}Установка Visual Studio Code...${NC}"
+
+    # Проверяем snapd
+    if ! command -v snap &>/dev/null; then
+        log "${YELLOW}snapd не найден, устанавливаем snapd...${NC}"
+        if ! safe_apt install snapd; then
+            log "${RED}Ошибка при установке snapd${NC}"
+            return 1
+        fi
+        sudo systemctl enable --now snapd >> "$LOG_FILE" 2>&1
+    fi
+
+    # Установка VS Code
+    if sudo snap install code --classic >> "$LOG_FILE" 2>&1; then
+        log "${GREEN}Visual Studio Code успешно установлен${NC}"
+        return 0
+    else
+        log "${RED}Ошибка при установке Visual Studio Code${NC}"
+        return 1
+    fi
+}
+
+
+
 
 # Добавьте эту функцию перед main()
 show_menu() {
@@ -362,9 +392,10 @@ show_menu() {
         echo -e "6. Установить Outline Client"
         echo -e "7. Установить Postman"
         echo -e "8. Установить htop"
-        echo -e "9. Выход"
+	echo -e "9. Установить Visual Studio Code"
+	echo -e "10. Выход"
         echo -e "${GREEN}========================================${NC}"
-        read -p "Выберите действие [1-8]: " choice
+        read -p "Выберите действие [1-10]: " choice
 
         case $choice in
             1)
@@ -395,13 +426,16 @@ show_menu() {
                 install_postman
                 ;;
             8)
-                # Установка htop
-                install_htop
-                ;;
-            9)
-                echo -e "${GREEN}Выход...${NC}"
-                exit 0
-                ;;
+    		install_htop
+    		;;
+	    9)
+    		install_vscode
+    		;;
+	   10)
+    echo -e "${GREEN}Выход...${NC}"
+    exit 0
+    ;;
+
             *)
                 echo -e "${RED}Неверный выбор, попробуйте снова${NC}"
                 sleep 2
@@ -424,6 +458,7 @@ full_installation() {
         "Установка Outline Client:install_outline_client"
         "Установка Postman:install_postman"
         "Установка htop:install_htop"
+        "Установка Visual Studio Code:install_vscode"
     )
 
     local has_errors=0
