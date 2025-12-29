@@ -374,6 +374,41 @@ install_vscode() {
     fi
 }
 
+install_pycharm() {
+    log "${GREEN}Установка PyCharm Community (Flatpak)...${NC}"
+
+    # Уже установлен?
+    if flatpak list | grep -q com.jetbrains.PyCharm-Community; then
+        log "${YELLOW}PyCharm Community уже установлен${NC}"
+        return 0
+    fi
+
+    # 1. Зависимости
+    log "${BLUE}Проверка и установка Flatpak...${NC}"
+    safe_apt install flatpak ca-certificates || return 1
+
+    # 2. Добавление Flathub
+    log "${BLUE}Добавление Flathub...${NC}"
+    if ! flatpak remote-list | grep -q flathub; then
+        flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo \
+            >> "$LOG_FILE" 2>&1 || {
+            log "${RED}Ошибка добавления Flathub${NC}"
+            return 1
+        }
+    fi
+
+    # 3. Установка PyCharm
+    log "${BLUE}Установка PyCharm Community...${NC}"
+    if flatpak install -y flathub com.jetbrains.PyCharm-Community >> "$LOG_FILE" 2>&1; then
+        log "${GREEN}✔ PyCharm Community успешно установлен (Flatpak)${NC}"
+        log "${YELLOW}Запуск: flatpak run com.jetbrains.PyCharm-Community${NC}"
+        return 0
+    else
+        log "${RED}❌ Ошибка установки PyCharm Community${NC}"
+        return 1
+    fi
+}
+
 
 
 
@@ -392,10 +427,11 @@ show_menu() {
         echo -e "6. Установить Outline Client"
         echo -e "7. Установить Postman"
         echo -e "8. Установить htop"
-	echo -e "9. Установить Visual Studio Code"
-	echo -e "10. Выход"
+	    echo -e "9. Установить Visual Studio Code"
+	    echo -e "10. Установить PyCharm"
+        echo -e "11. Выход"
         echo -e "${GREEN}========================================${NC}"
-        read -p "Выберите действие [1-10]: " choice
+        read -p "Выберите действие [1-11]: " choice
 
         case $choice in
             1)
@@ -426,15 +462,18 @@ show_menu() {
                 install_postman
                 ;;
             8)
-    		install_htop
-    		;;
-	    9)
-    		install_vscode
-    		;;
-	   10)
-    echo -e "${GREEN}Выход...${NC}"
-    exit 0
-    ;;
+    		    install_htop
+    		    ;;
+	        9)
+    		    install_vscode
+    		    ;;
+	        10)
+                install_pycharm
+                ;;
+            11)
+                echo -e "${GREEN}Выход...${NC}"
+                exit 0
+                ;;
 
             *)
                 echo -e "${RED}Неверный выбор, попробуйте снова${NC}"
@@ -459,6 +498,7 @@ full_installation() {
         "Установка Postman:install_postman"
         "Установка htop:install_htop"
         "Установка Visual Studio Code:install_vscode"
+        "Установка PyCharm:install_pycharm"
     )
 
     local has_errors=0
