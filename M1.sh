@@ -244,7 +244,61 @@ install_zsh() {
         setup_bira_theme
     fi
     
+    # ДОБАВЛЯЕМ НАСТРОЙКИ BASH
+    log "${GREEN}Настройка Bash...${NC}"
+    configure_bash_history
+    
     log "${YELLOW}Перезагрузите терминал или выполните 'zsh' для входа в Zsh${NC}"
+    log "${YELLOW}Для применения настроек Bash выполните: source /etc/bash.bashrc${NC}"
+    return 0
+}
+
+# Новая функция для настройки Bash
+configure_bash_history() {
+    local bashrc_file="/etc/bash.bashrc"
+    local settings_to_add=(
+        "shopt -s histappend"
+        "PROMPT_COMMAND='history -a'"
+    )
+    
+    # Проверяем, существуют ли уже эти настройки
+    local need_update=false
+    
+    for setting in "${settings_to_add[@]}"; do
+        if ! grep -q "^$(echo "$setting" | sed 's/\[/\\[/g' | sed 's/\]/\\]/g')" "$bashrc_file" 2>/dev/null; then
+            need_update=true
+            break
+        fi
+    done
+    
+    if [ "$need_update" = true ]; then
+        log "${YELLOW}Добавление настроек истории Bash в $bashrc_file...${NC}"
+        
+        # Создаем резервную копию, если ее нет
+        if [ ! -f "${bashrc_file}.bak" ]; then
+            cp "$bashrc_file" "${bashrc_file}.bak"
+            log "${GREEN}Создана резервная копия: ${bashrc_file}.bak${NC}"
+        fi
+        
+        # Добавляем настройки в конец файла
+        echo "" >> "$bashrc_file"
+        echo "# Настройки истории команд (добавлено скриптом установки)" >> "$bashrc_file"
+        for setting in "${settings_to_add[@]}"; do
+            echo "$setting" >> "$bashrc_file"
+            log "${GREEN}Добавлено: $setting${NC}"
+        done
+        
+        log "${GREEN}Настройки Bash успешно добавлены${NC}"
+        
+        # Применяем настройки для текущей сессии
+        if [ -f "$bashrc_file" ]; then
+            source "$bashrc_file" 2>/dev/null || true
+            log "${YELLOW}Настройки применены для текущей сессии${NC}"
+        fi
+    else
+        log "${YELLOW}Настройки истории Bash уже присутствуют в $bashrc_file, пропускаем...${NC}"
+    fi
+    
     return 0
 }
 
