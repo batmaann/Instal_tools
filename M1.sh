@@ -1,5 +1,7 @@
 #!/bin/bash
 
+set -o pipefail
+
 # Цвета для вывода
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -9,8 +11,16 @@ CYAN='\033[0;36m'
 PURPLE='\033[0;35m'
 NC='\033[0m' # No Color
 
-# Лог файл
-LOG_FILE="installation.log"
+# Лог-файл
+LOG_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/instal-tools"
+LOG_FILE="${LOG_DIR}/installation.log"
+
+init_log() {
+    if ! mkdir -p "$LOG_DIR" || ! : > "$LOG_FILE"; then
+        echo "Не удалось создать лог-файл: $LOG_FILE" >&2
+        exit 1
+    fi
+}
 
 # Функция для логирования
 log() {
@@ -47,6 +57,20 @@ safe_apt() {
         return 1
     fi
     return 0
+}
+
+check_supported_apt_system() {
+    if [ ! -r /etc/os-release ]; then
+        log "${RED}Не удалось определить дистрибутив: /etc/os-release отсутствует${NC}"
+        return 1
+    fi
+
+    # shellcheck disable=SC1091
+    . /etc/os-release
+    if [ "${ID:-}" != "ubuntu" ] && [ "${ID:-}" != "debian" ]; then
+        log "${RED}Поддерживаются только Ubuntu и Debian. Обнаружено: ${PRETTY_NAME:-неизвестно}${NC}"
+        return 1
+    fi
 }
 
 # Функция для обновления пакетов
@@ -231,7 +255,7 @@ install_zsh() {
     else
         log "${GREEN}Установка Zsh...${NC}"
         if safe_apt install zsh; then
-            chsh -s "$(which zsh)"
+            sudo chsh -s "$(command -v zsh)" "$USER"
             log "${GREEN}Zsh успешно установлен и установлен как оболочка по умолчанию. Версия: $(zsh --version | awk '{print $2}')${NC}"
         else
             log "${RED}Ошибка при установке Zsh${NC}"
@@ -276,15 +300,15 @@ configure_bash_history() {
         
         # Создаем резервную копию, если ее нет
         if [ ! -f "${bashrc_file}.bak" ]; then
-            cp "$bashrc_file" "${bashrc_file}.bak"
+            sudo cp "$bashrc_file" "${bashrc_file}.bak"
             log "${GREEN}Создана резервная копия: ${bashrc_file}.bak${NC}"
         fi
         
         # Добавляем настройки в конец файла
-        echo "" >> "$bashrc_file"
-        echo "# Настройки истории команд (добавлено скриптом установки)" >> "$bashrc_file"
+        printf '\n%s\n' "# Настройки истории команд (добавлено скриптом установки)" |
+            sudo tee -a "$bashrc_file" > /dev/null
         for setting in "${settings_to_add[@]}"; do
-            echo "$setting" >> "$bashrc_file"
+            printf '%s\n' "$setting" | sudo tee -a "$bashrc_file" > /dev/null
             log "${GREEN}Добавлено: $setting${NC}"
         done
         
@@ -302,7 +326,7 @@ configure_bash_history() {
     return 0
 }
 
-    install_outline_client() {
+install_outline_client() {
         if is_package_installed outline-client; then
             log "${YELLOW}Outline Client уже установлен${NC}"
             return 0
@@ -355,13 +379,13 @@ install_postman() {
         # Альтернативный метод установки (через tar.gz)
         log "${YELLOW}Попытка установки через tar.gz...${NC}"
         
-        local temp_dir=$(mktemp -d)
-        local version="10.24.7"  # Можно обновлять по мере выхода новых версий
+        local temp_dir
+        temp_dir=$(mktemp -d)
         
         if wget "https://dl.pstmn.io/download/latest/linux64" -O "$temp_dir/postman.tar.gz" >> "$LOG_FILE" 2>&1; then
             log "${GREEN}Распаковка Postman...${NC}"
             sudo tar -xzf "$temp_dir/postman.tar.gz" -C /opt >> "$LOG_FILE" 2>&1
-            sudo ln -s /opt/Postman/Postman /usr/bin/postman
+            sudo ln -sf /opt/Postman/Postman /usr/bin/postman
             
             # Создание ярлыка для рабочего стола
             cat <<EOF | sudo tee /usr/share/applications/postman.desktop > /dev/null
@@ -464,9 +488,114 @@ install_pycharm() {
 }
 
 
+install_docker_desktop() {
+    local arch
+    local distro
+    local codename
+    local temp_dir
+    local package_path
+    local docker_repo
+    local mem_total_kb
 
+    if dpkg-query -W -f='${Status}' docker-desktop 2>/dev/null | grep -q "install ok installed"; then
+        log "${YELLOW}Docker Desktop уже установлен${NC}"
+        return 0
+    fi
 
-# Добавьте эту функцию перед main()
+    check_supported_apt_system || return 1
+
+    arch=$(dpkg --print-architecture)
+    if [ "$arch" != "amd64" ]; then
+        log "${RED}Docker Desktop для Linux поддерживает только amd64. Обнаружено: $arch${NC}"
+        return 1
+    fi
+
+    if [ ! -d /run/systemd/system ]; then
+        log "${RED}Docker Desktop требует systemd${NC}"
+        return 1
+    fi
+
+    mem_total_kb=$(awk '/^MemTotal:/ {print $2}' /proc/meminfo)
+    if [ "${mem_total_kb:-0}" -lt 4194304 ]; then
+        log "${RED}Docker Desktop требует не менее 4 ГБ оперативной памяти${NC}"
+        return 1
+    fi
+
+    if ! find /usr/share/xsessions /usr/share/wayland-sessions -maxdepth 1 \
+        -type f -name '*.desktop' -print -quit 2>/dev/null | grep -q .; then
+        log "${RED}Не найдена поддерживаемая графическая среда рабочего стола${NC}"
+        return 1
+    fi
+
+    if [ ! -e /dev/kvm ]; then
+        log "${YELLOW}Устройство /dev/kvm не найдено. Пытаемся загрузить модуль KVM...${NC}"
+        sudo modprobe kvm >> "$LOG_FILE" 2>&1 || true
+        if grep -qE 'vendor_id[[:space:]]*: GenuineIntel' /proc/cpuinfo; then
+            sudo modprobe kvm_intel >> "$LOG_FILE" 2>&1 || true
+        elif grep -qE 'vendor_id[[:space:]]*: AuthenticAMD' /proc/cpuinfo; then
+            sudo modprobe kvm_amd >> "$LOG_FILE" 2>&1 || true
+        fi
+    fi
+
+    if [ ! -e /dev/kvm ]; then
+        log "${RED}KVM недоступен. Включите аппаратную виртуализацию в BIOS/UEFI и повторите установку.${NC}"
+        return 1
+    fi
+
+    # shellcheck disable=SC1091
+    . /etc/os-release
+    distro="$ID"
+    codename="${VERSION_CODENAME:-}"
+    if [ -z "$codename" ]; then
+        log "${RED}Не удалось определить кодовое имя выпуска Linux${NC}"
+        return 1
+    fi
+
+    log "${GREEN}Настройка официального репозитория Docker...${NC}"
+    safe_apt install ca-certificates curl gnupg qemu-system-x86 pass uidmap dbus-user-session gnome-terminal || return 1
+    sudo install -m 0755 -d /etc/apt/keyrings
+    if ! sudo curl -fsSL "https://download.docker.com/linux/${distro}/gpg" \
+        -o /etc/apt/keyrings/docker.asc; then
+        log "${RED}Не удалось загрузить GPG-ключ Docker${NC}"
+        return 1
+    fi
+    sudo chmod a+r /etc/apt/keyrings/docker.asc
+
+    docker_repo="deb [arch=${arch} signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/${distro} ${codename} stable"
+    printf '%s\n' "$docker_repo" |
+        sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+    safe_apt update || return 1
+
+    temp_dir=$(mktemp -d)
+    package_path="${temp_dir}/docker-desktop-amd64.deb"
+    log "${GREEN}Загрузка актуального пакета Docker Desktop...${NC}"
+    if ! curl -fL --retry 3 \
+        "https://desktop.docker.com/linux/main/amd64/docker-desktop-amd64.deb" \
+        -o "$package_path" >> "$LOG_FILE" 2>&1; then
+        rm -rf "$temp_dir"
+        log "${RED}Не удалось загрузить Docker Desktop${NC}"
+        return 1
+    fi
+
+    log "${GREEN}Установка Docker Desktop...${NC}"
+    if ! sudo apt-get install -y "$package_path" >> "$LOG_FILE" 2>&1; then
+        rm -rf "$temp_dir"
+        log "${RED}Ошибка при установке Docker Desktop${NC}"
+        return 1
+    fi
+    rm -rf "$temp_dir"
+
+    if ! getent group kvm > /dev/null; then
+        sudo groupadd kvm
+    fi
+    sudo usermod -aG kvm "$USER"
+
+    log "${GREEN}Docker Desktop успешно установлен${NC}"
+    log "${YELLOW}Выйдите из системы и войдите снова, затем запустите Docker Desktop из меню приложений.${NC}"
+    log "${YELLOW}При первом запуске потребуется принять условия Docker Desktop.${NC}"
+}
+
+# Интерактивное меню
 show_menu() {
     while true; do
         clear
@@ -481,11 +610,12 @@ show_menu() {
         echo -e "6. Установить Outline Client"
         echo -e "7. Установить Postman"
         echo -e "8. Установить htop"
-	    echo -e "9. Установить Visual Studio Code"
-	    echo -e "10. Установить PyCharm"
-        echo -e "11. Выход"
+        echo -e "9. Установить Visual Studio Code"
+        echo -e "10. Установить PyCharm"
+        echo -e "11. Установить Docker Desktop"
+        echo -e "12. Выход"
         echo -e "${GREEN}========================================${NC}"
-        read -p "Выберите действие [1-11]: " choice
+        read -rp "Выберите действие [1-12]: " choice
 
         case $choice in
             1)
@@ -516,15 +646,18 @@ show_menu() {
                 install_postman
                 ;;
             8)
-    		    install_htop
-    		    ;;
-	        9)
-    		    install_vscode
-    		    ;;
-	        10)
+                install_htop
+                ;;
+            9)
+                install_vscode
+                ;;
+            10)
                 install_pycharm
                 ;;
             11)
+                install_docker_desktop
+                ;;
+            12)
                 echo -e "${GREEN}Выход...${NC}"
                 exit 0
                 ;;
@@ -535,11 +668,11 @@ show_menu() {
                 ;;
         esac
 
-        read -p "Нажмите Enter чтобы продолжить..."
+        read -rp "Нажмите Enter чтобы продолжить..."
     done
 }
 
-# Добавьте эту новую функцию для полной установки
+# Полная установка
 full_installation() {
     log "${GREEN}=== Начало полной установки ===${NC}"
 
@@ -578,17 +711,25 @@ full_installation() {
     return $has_errors
 }
 
-# Модифицируйте функцию main()
+# Точка входа
 main() {
-    # Проверка прав sudo
-    if [ "$(id -u)" -ne 0 ]; then
-        log "${RED}Ошибка: этот скрипт требует прав root/sudo. Запустите с sudo.${NC}"
+    init_log
+
+    if [ "$(id -u)" -eq 0 ]; then
+        log "${RED}Не запускайте M1.sh от root. Запустите его обычным пользователем: ./M1.sh${NC}"
         exit 1
     fi
 
-    # Очистка лог-файла
-    > "$LOG_FILE"
-    
+    if ! command -v sudo > /dev/null; then
+        log "${RED}Для работы скрипта требуется sudo${NC}"
+        exit 1
+    fi
+
+    if ! command -v apt-get > /dev/null || ! command -v dpkg > /dev/null; then
+        log "${RED}Скрипт поддерживает только системы на базе Debian/Ubuntu${NC}"
+        exit 1
+    fi
+
     # Если есть аргументы командной строки, выполнить их
     if [ $# -gt 0 ]; then
         case $1 in
@@ -612,9 +753,25 @@ main() {
                 ;;
             --htop)
                 install_htop
-                ;;    
+                ;;
+            --postman)
+                install_postman
+                ;;
+            --vscode)
+                install_vscode
+                ;;
+            --pycharm)
+                install_pycharm
+                ;;
+            --docker-desktop)
+                install_docker_desktop
+                ;;
+            --help|-h)
+                echo "Использование: $0 [--full|--update|--git|--chrome|--zsh|--outline|--postman|--htop|--vscode|--pycharm|--docker-desktop]"
+                ;;
             *)
-                echo "Использование: $0 [--full|--update|--git|--chrome|--zsh|--outline]"
+                echo "Неизвестный аргумент: $1"
+                echo "Используйте $0 --help для списка доступных параметров"
                 exit 1
                 ;;
         esac
