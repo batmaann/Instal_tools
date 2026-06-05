@@ -9,7 +9,7 @@
 - `M3.sh` - настройка SSH-сервера.
 
 `M1.sh` умеет устанавливать Git, Google Chrome, Zsh и Oh My Zsh, Outline
-Client, Postman, htop, Visual Studio Code, PyCharm Community и Docker Desktop.
+Client, Postman, htop, Visual Studio Code, PyCharm Community, Docker Desktop и WebStorm.
 
 ## Установка и запуск
 
@@ -33,6 +33,7 @@ cd Instal_tools
 
 ```bash
 ./M1.sh --docker-desktop
+./M1.sh --webstorm
 ./M1.sh --help
 ```
 
@@ -50,3 +51,45 @@ cd Instal_tools
 первом запуске Docker Desktop потребуется принять лицензионные условия.
 
 Официальная инструкция: https://docs.docker.com/desktop/setup/install/linux/
+
+## WebStorm
+
+Отдельной Community-редакции WebStorm не существует. Полная версия WebStorm
+официально бесплатна для некоммерческого использования; соответствующий тип
+лицензии выбирается при первом запуске.
+
+Обычная установка:
+
+```bash
+./M1.sh --webstorm
+```
+
+Скрипт сначала использует официальный Snap Store. Если он недоступен, скрипт
+получает последнюю стабильную версию через API JetBrains, скачивает архив с
+основного или резервного официального CDN и проверяет SHA-256. Перед установкой
+проверяются архитектура, графическая среда, 8 ГБ RAM и 10 ГБ свободного места.
+
+Для сетей с ограниченным доступом поддерживаются стандартные переменные
+`HTTPS_PROXY` и `HTTP_PROXY`. Чтобы сразу использовать архив без Snap:
+
+```bash
+WEBSTORM_INSTALL_METHOD=archive ./M1.sh --webstorm
+```
+
+Если API релизов недоступен, можно указать известную версию:
+
+```bash
+WEBSTORM_INSTALL_METHOD=archive WEBSTORM_VERSION=2026.1.3 ./M1.sh --webstorm
+```
+
+Можно указать доступное HTTPS-зеркало вручную. Для безопасности обязательна
+контрольная сумма или ссылка на нее:
+
+```bash
+WEBSTORM_DOWNLOAD_URL=https://mirror.example/WebStorm.tar.gz \
+WEBSTORM_SHA256=<sha256> \
+./M1.sh --webstorm
+```
+
+Официальные сведения о лицензии:
+https://www.jetbrains.com/help/webstorm/register.html
