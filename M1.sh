@@ -488,6 +488,267 @@ install_pycharm() {
 }
 
 
+download_file() {
+    local destination=$1
+    shift
+    local url
+    local display_url
+
+    for url in "$@"; do
+        [ -n "$url" ] || continue
+        display_url=${url%%\?*}
+        log "${BLUE}Загрузка: $display_url${NC}"
+        rm -f "$destination"
+        if curl -fL --retry 3 --retry-delay 3 --connect-timeout 20 \
+            "$url" -o "$destination" >> "$LOG_FILE" 2>&1; then
+            return 0
+        fi
+        log "${YELLOW}Источник недоступен, пробуем следующий...${NC}"
+    done
+
+    return 1
+}
+
+install_webstorm_archive() {
+    local arch
+    local download_key
+    local temp_dir
+    local release_json
+    local release_data
+    local version
+    local download_url
+    local checksum_url
+    local cdn_url
+    local cdn_checksum_url
+    local archive_path
+    local checksum_path
+    local expected_checksum
+    local actual_checksum
+    local extract_dir
+    local source_dir
+    local install_dir
+    local launcher
+    local mem_total_kb
+    local available_kb
+    local archive_name
+
+    arch=$(dpkg --print-architecture)
+    case "$arch" in
+        amd64)
+            download_key="linux"
+            ;;
+        arm64)
+            download_key="linuxARM64"
+            ;;
+        *)
+            log "${RED}WebStorm поддерживает только amd64 и arm64. Обнаружено: $arch${NC}"
+            return 1
+            ;;
+    esac
+
+    mem_total_kb=$(awk '/^MemTotal:/ {print $2}' /proc/meminfo)
+    if [ "${mem_total_kb:-0}" -lt 8388608 ]; then
+        log "${RED}WebStorm требует не менее 8 ГБ оперативной памяти${NC}"
+        return 1
+    fi
+
+    available_kb=$(df -Pk /opt | awk 'NR == 2 {print $4}')
+    if [ "${available_kb:-0}" -lt 10485760 ]; then
+        log "${RED}Для WebStorm требуется не менее 10 ГБ свободного места в /opt${NC}"
+        return 1
+    fi
+
+    if ! find /usr/share/xsessions /usr/share/wayland-sessions -maxdepth 1 \
+        -type f -name '*.desktop' -print -quit 2>/dev/null | grep -q .; then
+        log "${RED}Не найдена графическая среда для запуска WebStorm${NC}"
+        return 1
+    fi
+
+    safe_apt install ca-certificates curl tar python3 || return 1
+
+    temp_dir=$(mktemp -d)
+    release_json="${temp_dir}/release.json"
+    archive_path="${temp_dir}/webstorm.tar.gz"
+    checksum_path="${temp_dir}/webstorm.tar.gz.sha256"
+
+    if [ -n "${WEBSTORM_DOWNLOAD_URL:-}" ]; then
+        if [[ "$WEBSTORM_DOWNLOAD_URL" != https://* ]]; then
+            log "${RED}WEBSTORM_DOWNLOAD_URL должен использовать HTTPS${NC}"
+            rm -rf "$temp_dir"
+            return 1
+        fi
+        version="custom"
+        download_url="$WEBSTORM_DOWNLOAD_URL"
+        checksum_url="${WEBSTORM_CHECKSUM_URL:-}"
+        cdn_url=""
+        cdn_checksum_url=""
+        log "${YELLOW}Используется URL из WEBSTORM_DOWNLOAD_URL${NC}"
+    elif [ -n "${WEBSTORM_VERSION:-}" ]; then
+        version="$WEBSTORM_VERSION"
+        if [ "$download_key" = "linuxARM64" ]; then
+            archive_name="WebStorm-${version}-aarch64.tar.gz"
+        else
+            archive_name="WebStorm-${version}.tar.gz"
+        fi
+        download_url="https://download.jetbrains.com/webstorm/${archive_name}"
+        checksum_url="${download_url}.sha256"
+        cdn_url="https://download-cdn.jetbrains.com/webstorm/${archive_name}"
+        cdn_checksum_url="${cdn_url}.sha256"
+        log "${YELLOW}Используется версия из WEBSTORM_VERSION: $version${NC}"
+    else
+        log "${GREEN}Получение информации о последнем стабильном WebStorm...${NC}"
+        if ! download_file "$release_json" \
+            "https://data.services.jetbrains.com/products/releases?code=WS&latest=true&type=release"; then
+            rm -rf "$temp_dir"
+            log "${RED}Не удалось получить данные о релизе WebStorm${NC}"
+            return 1
+        fi
+
+        if ! release_data=$(python3 -c '
+import json
+import sys
+
+key = sys.argv[1]
+data = json.load(sys.stdin)["WS"][0]
+download = data["downloads"][key]
+print("|".join((data["version"], download["link"], download["checksumLink"])))
+' "$download_key" < "$release_json"); then
+            rm -rf "$temp_dir"
+            log "${RED}Не удалось разобрать ответ API JetBrains${NC}"
+            return 1
+        fi
+
+        IFS='|' read -r version download_url checksum_url <<< "$release_data"
+        cdn_url=${download_url/https:\/\/download.jetbrains.com/https:\/\/download-cdn.jetbrains.com}
+        cdn_checksum_url=${checksum_url/https:\/\/download.jetbrains.com/https:\/\/download-cdn.jetbrains.com}
+    fi
+
+    if [[ ! "$version" =~ ^[0-9A-Za-z][0-9A-Za-z._-]*$ ]]; then
+        rm -rf "$temp_dir"
+        log "${RED}Некорректная версия WebStorm: $version${NC}"
+        return 1
+    fi
+
+    log "${GREEN}Загрузка WebStorm ${version}...${NC}"
+    if ! download_file "$archive_path" "$download_url" "$cdn_url"; then
+        rm -rf "$temp_dir"
+        log "${RED}Не удалось загрузить WebStorm${NC}"
+        log "${YELLOW}Можно задать HTTPS_PROXY или WEBSTORM_DOWNLOAD_URL и повторить запуск.${NC}"
+        return 1
+    fi
+
+    if [ -n "${WEBSTORM_SHA256:-}" ]; then
+        expected_checksum=${WEBSTORM_SHA256,,}
+    elif [ -n "$checksum_url" ]; then
+        if [[ "$checksum_url" != https://* ]]; then
+            rm -rf "$temp_dir"
+            log "${RED}WEBSTORM_CHECKSUM_URL должен использовать HTTPS${NC}"
+            return 1
+        fi
+        if ! download_file "$checksum_path" "$checksum_url" "$cdn_checksum_url"; then
+            rm -rf "$temp_dir"
+            log "${RED}Не удалось загрузить контрольную сумму WebStorm${NC}"
+            return 1
+        fi
+        expected_checksum=$(awk 'NR == 1 {print $1}' "$checksum_path")
+    else
+        rm -rf "$temp_dir"
+        log "${RED}Для пользовательского URL задайте WEBSTORM_SHA256 или WEBSTORM_CHECKSUM_URL${NC}"
+        return 1
+    fi
+
+    if [[ ! "$expected_checksum" =~ ^[0-9a-f]{64}$ ]]; then
+        rm -rf "$temp_dir"
+        log "${RED}Некорректная контрольная сумма SHA-256${NC}"
+        return 1
+    fi
+
+    actual_checksum=$(sha256sum "$archive_path" | awk '{print $1}')
+    if [ "$actual_checksum" != "$expected_checksum" ]; then
+        rm -rf "$temp_dir"
+        log "${RED}Контрольная сумма WebStorm не совпала${NC}"
+        return 1
+    fi
+
+    extract_dir="${temp_dir}/extracted"
+    mkdir -p "$extract_dir"
+    if ! tar -xzf "$archive_path" -C "$extract_dir" >> "$LOG_FILE" 2>&1; then
+        rm -rf "$temp_dir"
+        log "${RED}Не удалось распаковать WebStorm${NC}"
+        return 1
+    fi
+
+    source_dir=$(find "$extract_dir" -mindepth 1 -maxdepth 1 -type d -print -quit)
+    if [ -z "$source_dir" ]; then
+        rm -rf "$temp_dir"
+        log "${RED}В архиве WebStorm не найден каталог приложения${NC}"
+        return 1
+    fi
+
+    launcher=$(find "$source_dir/bin" -maxdepth 1 -type f \
+        \( -name 'webstorm' -o -name 'webstorm.sh' \) -print -quit)
+    if [ -z "$launcher" ]; then
+        rm -rf "$temp_dir"
+        log "${RED}Не найден исполняемый файл WebStorm${NC}"
+        return 1
+    fi
+
+    install_dir="/opt/webstorm-${version}"
+    sudo rm -rf "$install_dir"
+    sudo mv "$source_dir" "$install_dir"
+    sudo ln -sfn "$install_dir" /opt/webstorm
+    launcher="${install_dir}/bin/$(basename "$launcher")"
+    sudo ln -sfn "$launcher" /usr/local/bin/webstorm
+
+    sudo tee /usr/share/applications/webstorm.desktop > /dev/null <<EOF
+[Desktop Entry]
+Name=WebStorm
+Comment=JavaScript and TypeScript IDE
+Exec=/usr/local/bin/webstorm %f
+Icon=/opt/webstorm/bin/webstorm.svg
+Terminal=false
+Type=Application
+Categories=Development;IDE;
+StartupWMClass=jetbrains-webstorm
+EOF
+
+    rm -rf "$temp_dir"
+    log "${GREEN}WebStorm ${version} успешно установлен из официального архива${NC}"
+    log "${YELLOW}Запуск: webstorm${NC}"
+    return 0
+}
+
+install_webstorm() {
+    log "${GREEN}Установка WebStorm...${NC}"
+    log "${YELLOW}WebStorm бесплатен для некоммерческого использования, но отдельной Community-редакции нет.${NC}"
+
+    if command -v webstorm > /dev/null || snap list webstorm > /dev/null 2>&1; then
+        log "${YELLOW}WebStorm уже установлен${NC}"
+        return 0
+    fi
+
+    if [ "${WEBSTORM_INSTALL_METHOD:-auto}" != "archive" ] && \
+        [ -z "${WEBSTORM_DOWNLOAD_URL:-}" ]; then
+        if ! command -v snap > /dev/null; then
+            log "${YELLOW}snapd не найден, устанавливаем snapd...${NC}"
+            safe_apt install snapd || true
+            sudo systemctl enable --now snapd >> "$LOG_FILE" 2>&1 || true
+        fi
+
+        if command -v snap > /dev/null; then
+            log "${GREEN}Попытка установки WebStorm через официальный Snap Store...${NC}"
+            if sudo snap install webstorm --classic >> "$LOG_FILE" 2>&1; then
+                log "${GREEN}WebStorm успешно установлен через Snap${NC}"
+                return 0
+            fi
+            log "${YELLOW}Snap Store недоступен. Переходим к официальному архиву JetBrains.${NC}"
+        fi
+    fi
+
+    install_webstorm_archive
+}
+
+
 install_docker_desktop() {
     local arch
     local distro
@@ -613,9 +874,10 @@ show_menu() {
         echo -e "9. Установить Visual Studio Code"
         echo -e "10. Установить PyCharm"
         echo -e "11. Установить Docker Desktop"
-        echo -e "12. Выход"
+        echo -e "12. Установить WebStorm"
+        echo -e "13. Выход"
         echo -e "${GREEN}========================================${NC}"
-        read -rp "Выберите действие [1-12]: " choice
+        read -rp "Выберите действие [1-13]: " choice
 
         case $choice in
             1)
@@ -658,6 +920,9 @@ show_menu() {
                 install_docker_desktop
                 ;;
             12)
+                install_webstorm
+                ;;
+            13)
                 echo -e "${GREEN}Выход...${NC}"
                 exit 0
                 ;;
@@ -766,8 +1031,11 @@ main() {
             --docker-desktop)
                 install_docker_desktop
                 ;;
+            --webstorm)
+                install_webstorm
+                ;;
             --help|-h)
-                echo "Использование: $0 [--full|--update|--git|--chrome|--zsh|--outline|--postman|--htop|--vscode|--pycharm|--docker-desktop]"
+                echo "Использование: $0 [--full|--update|--git|--chrome|--zsh|--outline|--postman|--htop|--vscode|--pycharm|--docker-desktop|--webstorm]"
                 ;;
             *)
                 echo "Неизвестный аргумент: $1"
@@ -781,5 +1049,6 @@ main() {
     fi
 }
 
-# Измените вызов main в конце скрипта на:
-main "$@"
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+    main "$@"
+fi
