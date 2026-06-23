@@ -183,6 +183,27 @@ install_google_chrome() {
     fi
 }
 
+install_tor_browser() {
+    if is_package_installed torbrowser-launcher; then
+        log "${YELLOW}Tor Browser Launcher уже установлен${NC}"
+        log "${YELLOW}Запуск: torbrowser-launcher${NC}"
+        return 0
+    fi
+
+    check_supported_apt_system || return 1
+
+    log "${GREEN}Установка Tor Browser Launcher...${NC}"
+    safe_apt install ca-certificates gnupg torbrowser-launcher || {
+        log "${RED}Ошибка при установке Tor Browser Launcher${NC}"
+        return 1
+    }
+
+    log "${GREEN}Tor Browser Launcher успешно установлен${NC}"
+    log "${YELLOW}При первом запуске Tor Browser будет загружен и проверен лаунчером.${NC}"
+    log "${YELLOW}Запуск: torbrowser-launcher${NC}"
+    return 0
+}
+
 install_oh_my_zsh() {
     log "${GREEN}Проверка установки Oh My Zsh...${NC}"
     if [ ! -d "$HOME/.oh-my-zsh" ]; then
@@ -875,9 +896,10 @@ show_menu() {
         echo -e "10. Установить PyCharm"
         echo -e "11. Установить Docker Desktop"
         echo -e "12. Установить WebStorm"
-        echo -e "13. Выход"
+        echo -e "13. Установить Tor Browser"
+        echo -e "14. Выход"
         echo -e "${GREEN}========================================${NC}"
-        read -rp "Выберите действие [1-13]: " choice
+        read -rp "Выберите действие [1-14]: " choice
 
         case $choice in
             1)
@@ -923,6 +945,9 @@ show_menu() {
                 install_webstorm
                 ;;
             13)
+                install_tor_browser
+                ;;
+            14)
                 echo -e "${GREEN}Выход...${NC}"
                 exit 0
                 ;;
@@ -945,6 +970,7 @@ full_installation() {
         "Обновление системы:update_packages"
         "Установка Git:install_git"
         "Установка Google Chrome:install_google_chrome"
+        "Установка Tor Browser:install_tor_browser"
         "Установка Zsh:install_zsh"
         "Установка Outline Client:install_outline_client"
         "Установка Postman:install_postman"
@@ -1010,6 +1036,9 @@ main() {
             --chrome)
                 install_google_chrome
                 ;;
+            --tor-browser)
+                install_tor_browser
+                ;;
             --zsh)
                 install_zsh
                 ;;
@@ -1035,7 +1064,7 @@ main() {
                 install_webstorm
                 ;;
             --help|-h)
-                echo "Использование: $0 [--full|--update|--git|--chrome|--zsh|--outline|--postman|--htop|--vscode|--pycharm|--docker-desktop|--webstorm]"
+                echo "Использование: $0 [--full|--update|--git|--chrome|--tor-browser|--zsh|--outline|--postman|--htop|--vscode|--pycharm|--docker-desktop|--webstorm]"
                 ;;
             *)
                 echo "Неизвестный аргумент: $1"
