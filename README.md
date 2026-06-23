@@ -8,7 +8,7 @@
 - `M2.sh` - установка и настройка Matrix Synapse.
 - `M3.sh` - настройка SSH-сервера.
 
-`M1.sh` умеет устанавливать Git, Google Chrome, Zsh и Oh My Zsh, Outline
+`M1.sh` умеет устанавливать Git, Google Chrome, Tor Browser, Zsh и Oh My Zsh, Outline
 Client, Postman, htop, Visual Studio Code, PyCharm Community, Docker Desktop и WebStorm.
 
 ## Установка и запуск
@@ -32,10 +32,23 @@ cd Instal_tools
 Для запуска отдельной установки без интерактивного меню:
 
 ```bash
+./M1.sh --tor-browser
 ./M1.sh --docker-desktop
 ./M1.sh --webstorm
 ./M1.sh --help
 ```
+
+## Tor Browser
+
+Установка Tor Browser выполняется через пакет `torbrowser-launcher` из
+репозиториев Debian/Ubuntu:
+
+```bash
+./M1.sh --tor-browser
+```
+
+При первом запуске лаунчер самостоятельно загрузит и проверит Tor Browser.
+Запуск после установки: `torbrowser-launcher`.
 
 ## Docker Desktop
 
